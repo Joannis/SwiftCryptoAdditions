@@ -4,7 +4,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "swift-crypto-additions",
+    name: "SwiftCryptoAdditions",
     platforms: [
         .macOS(.v10_15),
         .iOS(.v13)
