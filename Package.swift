@@ -31,6 +31,6 @@ let package = Package(
             ]),
         .testTarget(
             name: "swift-crypto-additionsTests",
-            dependencies: ["swift-crypto-additions"]),
+            dependencies: ["SwiftCryptoAdditions"]),
     ]
 )
