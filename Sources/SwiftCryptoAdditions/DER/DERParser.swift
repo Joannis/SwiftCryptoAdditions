@@ -59,7 +59,7 @@ enum DERParseError: Error {
 
 /// Friendlier "decoded" forms of the DER tags we know intrinsically how to
 /// handle on our own.
-enum DERValue: Hashable {
+public enum DERValue: Hashable {
     // Inlined collections with complete contents
     case sequence(contents: [DERValue]), set(contents: Set<DERValue>)
     
@@ -87,12 +87,11 @@ enum DERValue: Hashable {
 /// - TODO: Specialize for sequences where Sequence.withContiguousStorageIfAvailable(_:) returns non-nil
 /// - TODO: Specialize for Collections
 /// - TODO: Improve the Sequence-ness by figuring out a way to return tags without entire buffers
-struct SimpleDERParser {
-    
+public struct SimpleDERParser {
     private var byteOffset: Int
     private var base: AnyIterator<UInt8>
     
-    init<S>(parsing bytes: S) where S: Sequence, S.Element == UInt8 {
+    public init<S>(parsing bytes: S) where S: Sequence, S.Element == UInt8 {
         self.byteOffset = 0
         self.base = AnyIterator(bytes.makeIterator())
     }
@@ -376,7 +375,7 @@ struct SimpleDERParser {
     ///   the collection leading up to that condition may have already been
     ///   returned. The caller is responsible for detecting and handling this
     ///   edge case if so desired.
-    mutating func nextValue(inliningSequences inlineSequences: Bool = true) throws -> DERValue? {
+    public mutating func nextValue(inliningSequences inlineSequences: Bool = true) throws -> DERValue? {
         if let currentOutline = outliningStack.last {
             try invalidateUnless(self.byteOffset <= currentOutline.stopOffset, guarding: .incorrectSequenceLength)
 

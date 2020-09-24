@@ -1,7 +1,9 @@
+import Foundation
 import Crypto
 import DiscretionalPrecision
 /*
 struct RSAPrivateKey { // mostly per PKCS#1
+    // DER has a version first
     let modulus: DHHugeInteger          // n
     let publicExponent: DHHugeInteger   // e
     let privateExponent: DHHugeInteger  // d
@@ -196,7 +198,7 @@ extension Insecure {
                     case invalidInitialSequence, invalidAlgorithmIdentifier, invalidSubjectPubkey, forbiddenTrailingData, invalidRSAPubkey
                 }
                 
-                internal init(publicExponent: ArbitraryInt, modulus: ArbitraryInt) {
+                public init(publicExponent: ArbitraryInt, modulus: ArbitraryInt) {
                     self.publicExponent = publicExponent
                     self.modulus = modulus
                 }
@@ -240,23 +242,55 @@ extension Insecure {
                     self.modulus = n
                     self.publicExponent = e
                 }
+                
+                public func isValidSignature<D: DataProtocol>(_ signature: ArbitraryInt, for data: D) -> Bool {
+                    let modulusOctets = modulus.byteWidth
+                    let signatureOctets = signature.byteWidth
+                    
+                    if modulusOctets != signatureOctets {
+                        return false
+                    }
+                    
+                    // Part of RSAVP1
+                    guard signature > .zero && signature < modulus - 1 else {
+                        return false
+                    }
+                    
+                    // Part of RSAVP1
+                    // m = s^e mod n
+                    let message = signature.montgomeryExponentiation(
+                        exponent: publicExponent,
+                        modulus: modulus
+                    )
+                    
+                    return message == ArbitraryInt(data: data, sign: false)
+                }
             }
             
             public struct PrivateKey {
-                // PrivateExponent d
+                // Private Exponent d
                 public let privateExponent: ArbitraryInt
+                
+                // Public Exponent e
+                public let publicKey: PublicKey
                 
                 // Modulus n
                 public let modulus: ArbitraryInt
                 
-                public init(privateExponent: ArbitraryInt, modulus: ArbitraryInt) {
+                public init(privateExponent: ArbitraryInt, publicExponent: ArbitraryInt, modulus: ArbitraryInt) {
                     self.privateExponent = privateExponent
                     self.modulus = modulus
+                    self.publicKey = PublicKey(publicExponent: publicExponent, modulus: modulus)
                 }
                 
                 public init(bits: Int = 2047, modulus: ArbitraryInt = .diffieHellmanGroup14) {
                     self.privateExponent = ArbitraryInt.random(bits: bits)
                     self.modulus = modulus
+                    let publicExponent = Generator.generator2.bignum.montgomeryExponentiation(
+                        exponent: self.privateExponent,
+                        modulus: modulus
+                    )
+                    self.publicKey = PublicKey(publicExponent: publicExponent, modulus: modulus)
                 }
                 
                 public func formSecret(with publicKey: PublicKey) -> SharedSecret {
@@ -264,8 +298,18 @@ extension Insecure {
                     return SharedSecret(bignum: secret)
                 }
                 
-                public func sign(_ message: ArbitraryInt) -> ArbitraryInt {
-                    message.montgomeryExponentiation(exponent: privateExponent, modulus: modulus)
+                public func signature<D: DataProtocol>(for message: D) throws -> ArbitraryInt {
+                    let message = ArbitraryInt(data: message, sign: false)
+                    
+                    guard message > .zero && message < modulus - 1 else {
+                        throw RSAError.messageRepresentativeOutOfRange
+                    }
+                    
+                    return signature(for: message)
+                }
+                
+                public func signature(for message: ArbitraryInt) -> ArbitraryInt {
+                    return message.montgomeryExponentiation(exponent: privateExponent, modulus: modulus)
                 }
                 
                 public func signPkcs1Padded(_ message: ArbitraryInt) throws -> ArbitraryInt {
@@ -281,21 +325,12 @@ extension Insecure {
                     let message = ArbitraryInt(bytes: bytes, sign: false)
                     return message.montgomeryExponentiation(exponent: privateExponent, modulus: modulus)
                 }
-                
-                public func formPublicKey(generator: Generator) -> PublicKey {
-                    let publicKey = generator.bignum.montgomeryExponentiation(
-                        exponent: self.privateExponent,
-                        modulus: modulus
-                    )
-                    
-                    return PublicKey(publicExponent: publicKey, modulus: modulus)
-                }
             }
             
-            public struct Generator {
+            internal struct Generator {
                 let bignum: ArbitraryInt
                 
-                public static let generator2 = Generator(bignum: 2)
+                internal static let generator2 = Generator(bignum: 2)
             }
             
             public struct SharedSecret {
@@ -309,7 +344,8 @@ extension Insecure {
     }
 }
 
-let diffieHellmanGroup14Prime: [UInt] = [
+// TODO: This should be properly formatted in the first place, instead of mapping this as a hack
+let diffieHellmanGroup14Prime: [UInt] = ([
     0xFFFFFFFFFFFFFFFF, 0xC90FDAA22168C234, 0xC4C6628B80DC1CD1,
     0x29024E088A67CC74, 0x020BBEA63B139B22, 0x514A08798E3404DD,
     0xEF9519B3CD3A431B, 0x302B0A6DF25F1437, 0x4FE1356D6D51C245,
@@ -321,7 +357,7 @@ let diffieHellmanGroup14Prime: [UInt] = [
     0xE39E772C180E8603, 0x9B2783A2EC07A28F, 0xB5C55DF06F4C52C9,
     0xDE2BCBF695581718, 0x3995497CEA956AE5, 0x15D2261898FA0510,
     0x15728E5A8AACAA68, 0xFFFFFFFFFFFFFFFF
-]
+] as [UInt]).map(\.bigEndian)
 
 extension ArbitraryInt {
     /// See: https://tools.ietf.org/html/rfc3526#page-3
@@ -329,4 +365,43 @@ extension ArbitraryInt {
         normalizing: diffieHellmanGroup14Prime,
         sign: false
     )
+    
+    public enum OverwrittenBits {
+        case none, one, two
+    }
+
+    public static func random(bits: Int = 2047, topBits: OverwrittenBits = .one, bottomBits: OverwrittenBits = .none) -> ArbitraryInt {
+        // Makes sure that 65 bits counts as 2 words, rather than 1
+        let wordCount = (bits + 64 - 1) / 64
+        let lastWordBits = (bits - 1) % 64
+        
+        // If all bits are set, a full mask is used, removing no bits
+        // If bits are missing, the extra bits are removed
+        let lastWordBitMask = lastWordBits == 64 ? UInt.max : (1 << (UInt(lastWordBits) + 1)) - 1
+        
+        let words = [UInt](unsafeUninitializedCapacity: wordCount) { (buffer, count) in
+            var rng = SystemRandomNumberGenerator()
+            
+            if wordCount != 0 {
+                for i in 0..<wordCount {
+                    buffer[i] = rng.next()
+                }
+            }
+            
+            buffer[wordCount - 1] &= lastWordBitMask
+            count = wordCount
+        }
+        
+        return ArbitraryInt(normalizing: words, sign: false)
+    }
+    
+    public init<D: DataProtocol>(data bytes: D, sign: Bool) {
+        self.init(bytes: Array(bytes), sign: sign)
+    }
+}
+
+public struct RSAError: Error {
+    let message: String
+    
+    static let messageRepresentativeOutOfRange = RSAError(message: "message representative out of range")
 }

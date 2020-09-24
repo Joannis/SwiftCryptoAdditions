@@ -221,8 +221,8 @@ final class swift_crypto_additionsTests: XCTestCase {
         let serverPrivateKey = Insecure.RSA.Signing.PrivateKey()
         let clientPrivateKey = Insecure.RSA.Signing.PrivateKey()
         
-        let serverPublicKey = serverPrivateKey.formPublicKey(generator: .generator2)
-        let clientPublicKey = clientPrivateKey.formPublicKey(generator: .generator2)
+        let serverPublicKey = serverPrivateKey.publicKey
+        let clientPublicKey = clientPrivateKey.publicKey
         
         let serverSecret = serverPrivateKey.formSecret(with: clientPublicKey)
         let clientSecret = clientPrivateKey.formSecret(with: serverPublicKey)
@@ -258,24 +258,120 @@ final class swift_crypto_additionsTests: XCTestCase {
         ) == 1)
     }
     
-    func testRSA2048TestVectors() throws {
-        // n
-        let modulus = ArbitraryInt("be7a684b40e23a5b4dc2f0f8ac756594fd8ba8114bd1664bd83ab363bda2f758b73876bd8ee4650461b596248f9149d39a646bb1064e6f773f7b63611bd711f20e64c745f7c7ad2e753e48b68ff62c52d616a805489492b718931eda9094e76d75beddbc74e7c669cddceceed553dfbbc9cbf49bc8962647fe38070a8503e08e681fb7495dff63d32020c1047bec3ef6833ffd39ff3054bf7a3578fb32aebce33f5fc3a18458a0ec71c66876e03a78ba09d7ee45e84394b5b0b732af8ae4a672b2f2d3444c99f836a16d31f7a5c96a9ae4fe12e6e2b8c3f16862d076a81edfe6c63eefbbd2978ae44659b353188206e487efcccd165d9902f3b20b72d9ad6011")!
-
-        // d
-        let privateExponent = ArbitraryInt("59c4e9bb31a08cdd33f840460a4d27ab40951d87cd422a626b4d3af7324c08236cf234efe0549e9122958865c1adb8ebfb930138045f59e40aec9569124c597e492f50c516622a29bf82b3952aa2dbbfcc7b1003b171a7f597a4da812a6baae828fa63992a45837aa0d5526abaea5502b537a497f8c05ed94623d499ae17a62fd67b4a4aae7224bc05667766222f936885cc06384263748d47f5335aed907646c80b98682f5063ceee5dcf07839436ae54379f62b2585e3f7efcde75378635aa60e2ec4b6e9494060700144f32988a8bf0208bc91362da8b082d03f66d128c34f2b61a0c1ad05739952f55ee4a6bff334d1230fa186e472f659cf2d5c58a856b")!
-
-        // e
-//        let generator: ArbitraryInt = 17
-        
-        let privateKey = Insecure.RSA.Signing.PrivateKey(
-            privateExponent: privateExponent,
-            modulus: modulus
+//    func testRSA2048TestVectors() throws {
+//        // n
+//        let modulus = ArbitraryInt("be7a684b40e23a5b4dc2f0f8ac756594fd8ba8114bd1664bd83ab363bda2f758b73876bd8ee4650461b596248f9149d39a646bb1064e6f773f7b63611bd711f20e64c745f7c7ad2e753e48b68ff62c52d616a805489492b718931eda9094e76d75beddbc74e7c669cddceceed553dfbbc9cbf49bc8962647fe38070a8503e08e681fb7495dff63d32020c1047bec3ef6833ffd39ff3054bf7a3578fb32aebce33f5fc3a18458a0ec71c66876e03a78ba09d7ee45e84394b5b0b732af8ae4a672b2f2d3444c99f836a16d31f7a5c96a9ae4fe12e6e2b8c3f16862d076a81edfe6c63eefbbd2978ae44659b353188206e487efcccd165d9902f3b20b72d9ad6011")!
+//
+//        // d
+//        let privateExponent = ArbitraryInt("59c4e9bb31a08cdd33f840460a4d27ab40951d87cd422a626b4d3af7324c08236cf234efe0549e9122958865c1adb8ebfb930138045f59e40aec9569124c597e492f50c516622a29bf82b3952aa2dbbfcc7b1003b171a7f597a4da812a6baae828fa63992a45837aa0d5526abaea5502b537a497f8c05ed94623d499ae17a62fd67b4a4aae7224bc05667766222f936885cc06384263748d47f5335aed907646c80b98682f5063ceee5dcf07839436ae54379f62b2585e3f7efcde75378635aa60e2ec4b6e9494060700144f32988a8bf0208bc91362da8b082d03f66d128c34f2b61a0c1ad05739952f55ee4a6bff334d1230fa186e472f659cf2d5c58a856b")!
+//
+//        // e
+////        let generator: ArbitraryInt = 17
+//
+//        let privateKey = Insecure.RSA.Signing.PrivateKey(
+//            privateExponent: privateExponent,
+//            publicExponent: <#T##ArbitraryInt#>
+//            modulus: modulus
+//        )
+//
+//        for vector in rsa2048SHA512TestVectors {
+//            XCTAssertEqual(privateKey.signature(for: vector.message), vector.signature)
+//        }
+//    }
+    
+    func testDoubleRatchet() throws {
+        try runDoubleRatchetConversation(
+            privateKey: Curve25519.KeyAgreement.PrivateKey.self,
+            hash: SHA256.self,
+            encryption: DoubleRatchetAESGCMEncryption()
         )
         
-        for vector in rsa2048SHA512TestVectors {
-            XCTAssertEqual(privateKey.sign(vector.message), vector.signature)
+        try runDoubleRatchetConversation(
+            privateKey: Curve25519.KeyAgreement.PrivateKey.self,
+            hash: SHA256.self,
+            encryption: DoubleRatchetChaChaPolyEncryption()
+        )
+    }
+    
+    func runDoubleRatchetConversation<PrivateKey: DoubleRatchetPrivateKey, H: HashFunction>(
+        privateKey: PrivateKey.Type,
+        hash: H.Type,
+        encryption: DoubleRatchetSymmetricEncryption
+    ) throws {
+        let recipientKey = PrivateKey()
+        let secret = SymmetricKey(size: .bits256)
+        let config = DoubleRatchetConfiguration<H>(
+            info: "protocolname".data(using: .ascii)!,
+            symmetricEncryption: encryption,
+            kdf: DefaultRatchetKDF<H>(
+                messageKeyConstant: Data([0x00]),
+                chainKeyConstant: Data([0x01]),
+                sharedInfo: Data([0x02, 0x03])
+            ),
+            headerEncoder: DefaultRatchetHeaderEncoder(),
+            headerAssociatedDataGenerator: .constant("constant".data(using: .ascii)!),
+            maxSkippedMessageKeys: 10
+        )
+        
+        var sender = try DoubleRatchetEngine<H, PrivateKey>.initializeSender(secretKey: secret, contactingRemote: recipientKey.publicKey, configuration: config)
+        let firstMessage = try sender.ratchetEncrypt("Hello".data(using: .utf8)!)
+        
+        var (receiver, message) = try DoubleRatchetEngine.initializeRecipient(
+            secretKey: secret,
+            contactedBy: sender.state.localPrivateKey.publicKey,
+            localPrivateKey: recipientKey,
+            configuration: config,
+            initialMessage: firstMessage
+        )
+        
+        XCTAssertEqual(message, "Hello".data(using: .utf8))
+        
+        func send(
+            _ message: String,
+            dropPacket: Bool = false,
+            shouldFail: Bool = false,
+            from sender: inout DoubleRatchetEngine<H, PrivateKey>,
+            to recipient: inout DoubleRatchetEngine<H, PrivateKey>
+        ) throws {
+            let message = message.data(using: .utf8)!
+            let encrypted = try sender.ratchetEncrypt(message)
+            
+            if !dropPacket {
+                if shouldFail {
+                    XCTAssertThrowsError(try recipient.ratchetDecrypt(encrypted))
+                } else {
+                    let decrypted = try recipient.ratchetDecrypt(encrypted)
+                    
+                    XCTAssertEqual(message, decrypted)
+                }
+            }
         }
+        
+        // Test basic communication
+        try send("Are you there?", from: &sender, to: &receiver)
+        try send("I'm getting impatient", from: &sender, to: &receiver)
+        try send("Bye!", from: &sender, to: &receiver)
+        
+        try send("Yes, sorry, I was busy...", from: &receiver, to: &sender)
+        // Test that a missed chat message isn't a disaster
+        try send("How're you doing?", dropPacket: true, from: &receiver, to: &sender)
+        try send("Hello?", from: &receiver, to: &sender)
+        
+        // Test that someone who manages to find your private keys does not read after re-keys
+        // Rekeys happen when you send a message back
+        var eavesdropper = receiver
+        try send("I missed your message", from: &sender, to: &receiver)
+        // Eavesdropper _can_ see this, because rekey hasn't happened yet
+        try send("I missed your message", from: &sender, to: &eavesdropper)
+        try send("I think someone is listening into this convo.", from: &receiver, to: &sender)
+        try send("That shouldn't be a problem anymore, since you wrote back!", shouldFail: true, from: &sender, to: &eavesdropper)
+    }
+    
+    func testRSASignVerify() throws {
+        let privateKey = Insecure.RSA.Signing.PrivateKey()
+        let data = Array("Hello, World!".utf8)
+        let signature = try privateKey.signature(for: data)
+        XCTAssertTrue(privateKey.publicKey.isValidSignature(signature, for: data))
     }
     
     func testSPKIParse() throws {
@@ -336,3 +432,23 @@ final class swift_crypto_additionsTests: XCTestCase {
 //    }
 }
 
+
+public struct DefaultRatchetHeaderEncoder: RatchetHeaderEncoder {
+    public init() {}
+    
+    public func encodeRatchetHeader<PublicKey: DoubleRatchetPublicKey>(_ header: RatchetMessage<PublicKey>.Header) throws -> Data {
+        try JSONEncoder().encode(header)
+    }
+    
+    public func decodeRatchetHeader<PublicKey: DoubleRatchetPublicKey>(from data: Data) throws -> RatchetMessage<PublicKey>.Header {
+        try JSONDecoder().decode(RatchetMessage<PublicKey>.Header.self, from: data)
+    }
+    
+    public func concatenate(authenticatedData: Data, withHeader header: Data) -> Data {
+        let info = header + authenticatedData
+        let digest = SHA256.hash(data: info)
+        return digest.withUnsafeBytes { buffer in
+            Data(buffer: buffer.bindMemory(to: UInt8.self))
+        }
+    }
+}

@@ -1,3 +1,3 @@
-# swift-crypto-additions
+# SwiftCryptoAdditions
 
-A description of this package.
+A library with useful crypto implementations & protocols that SwiftCrypto doesn't have.

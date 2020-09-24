@@ -8,7 +8,7 @@ public struct PKCS1PaddingError: Error {
 }
 
 internal struct PKCS1Padding {
-    internal static func paddedBytes<Data: DataProtocol>(data: Data, modulus: ArbitraryInt) throws -> [UInt8] {
+    internal static func paddedBytes<D: DataProtocol>(data: D, modulus: ArbitraryInt) throws -> [UInt8] {
         let mLen = data.count
         let k = ((modulus.bitWidth + 7) / 8)
         if mLen > k - 11 {
