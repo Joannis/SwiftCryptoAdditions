@@ -190,6 +190,12 @@ extension SymmetricKey: Codable {
 
 @dynamicMemberLookup
 public struct DoubleRatchetEngine<Hash: HashFunction, PrivateKey: DoubleRatchetPrivateKey> {
+    public struct SkippedKey: Codable {
+        let publicKey: PrivateKey.PublicKey
+        let messageIndex: Int
+        let messageKey: SymmetricKey
+    }
+    
     public struct State: Codable {
         // `RK`
         public fileprivate(set) var rootKey: SymmetricKey
@@ -215,7 +221,7 @@ public struct DoubleRatchetEngine<Hash: HashFunction, PrivateKey: DoubleRatchetP
         // `Nr`
         public fileprivate(set) var receivedMessages: Int
         
-        public fileprivate(set) var skippedKeys = [SymmetricKey]()
+        public fileprivate(set) var skippedKeys = [SkippedKey]()
         
         fileprivate init(
             secretKey: SymmetricKey,
@@ -352,7 +358,13 @@ public struct DoubleRatchetEngine<Hash: HashFunction, PrivateKey: DoubleRatchetP
                 let messageKey = try configuration.kdf.calculateMessageKey(fromChainKey: receivingKey)
                 self.receivingKey = try configuration.kdf.calculateChainKey(fromChainKey: receivingKey)
                 // TODO: Throttle backlog, there cannot be too many keys
-                self.skippedKeys.append(messageKey)
+                self.skippedKeys.append(
+                    SkippedKey(
+                        publicKey: message.header.senderPublicKey,
+                        messageIndex: message.header.messageNumber,
+                        messageKey: messageKey
+                    )
+                )
                 if self.skippedKeys.count > self.configuration.maxSkippedMessageKeys {
                     self.skippedKeys.removeFirst()
                 }
@@ -361,8 +373,18 @@ public struct DoubleRatchetEngine<Hash: HashFunction, PrivateKey: DoubleRatchetP
             }
         }
         
-        func decodeUsingSkippedMessageKeys() -> Data? {
-            nil
+        func decodeUsingSkippedMessageKeys() throws -> Data? {
+            for i in 0..<self.skippedKeys.count {
+                let skippedKey = self.skippedKeys[i]
+                
+                if skippedKey.messageIndex == message.header.messageNumber && message.header.senderPublicKey == skippedKey.publicKey {
+                    self.skippedKeys.remove(at: i)
+                    
+                    return try decryptMessage(message, usingKey: skippedKey.messageKey)
+                }
+            }
+            
+            return nil
         }
         
         func diffieHellmanRatchet() throws {
@@ -386,7 +408,7 @@ public struct DoubleRatchetEngine<Hash: HashFunction, PrivateKey: DoubleRatchetP
         }
         
         // 1. Try skipped message keys
-        if let plaintext = decodeUsingSkippedMessageKeys() {
+        if let plaintext = try decodeUsingSkippedMessageKeys() {
             return plaintext
         }
         
@@ -408,6 +430,10 @@ public struct DoubleRatchetEngine<Hash: HashFunction, PrivateKey: DoubleRatchetP
         self.receivingKey = try configuration.kdf.calculateChainKey(fromChainKey: receivingKey)
         self.receivedMessages += 1
         
+        return try decryptMessage(message, usingKey: messageKey)
+    }
+    
+    private func decryptMessage(_ message: RatchetMessage<PrivateKey.PublicKey>, usingKey messageKey: SymmetricKey) throws -> Data {
         let headerData = try configuration.headerEncoder.encodeRatchetHeader(message.header)
         let nonce = configuration.headerEncoder.concatenate(
             authenticatedData: configuration.headerAssociatedDataGenerator.generateAssociatedData(),
